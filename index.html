@@ -255,6 +255,7 @@ let devId = lv('hw_devId') || '';
 let capNm = lv('hw_cap')   || '';
 
 const GOOD_CAP = 'hotwater_increase_NIBE.h697_onetimeincrease_hotwater';
+const STATUS_CAP = 'measure_enum_NIBE.h697_onetimeincrease_hotwater';
 if (capNm && capNm !== GOOD_CAP) { capNm = ''; sv('hw_cap',''); }
 
 /* ── STATE ── */
@@ -403,12 +404,20 @@ async function runScript(scriptId) {
 }
 
 async function readCapability() {
-  // Les nåværende status fra NIBE for å vise riktig bilde ved oppstart
+  // Les pumpens faktiske status (measure_enum), ikke den skrivbare triggeren
+  // Den skrivbare nullstilles til 0 etter at engangskommandoen er sendt
   const r = await apiFetch('/api/manager/devices/device/' + devId);
   if (!r.ok) return null;
   const d = await r.json();
-  const cap = (d.capabilitiesObj || {})[capNm];
+  const cap = (d.capabilitiesObj || {})[STATUS_CAP];
   return cap ? cap.value : null;
+}
+
+function isActiveValue(val) {
+  // measure_enum returnerer "Off" når av, "Increase 1h" / "Íncrease 1h" osv. når på
+  if (val === null || val === undefined) return false;
+  const s = String(val).toLowerCase();
+  return s !== 'off' && s !== '0' && s !== 'false';
 }
 
 /* ── CONNECTION + INITIAL STATE READ ── */
@@ -442,13 +451,12 @@ async function connect(silent) {
       await findScripts();
     }
 
-    // Les faktisk status fra Homey og sett bilde deretter
+    // Les faktisk status fra pumpen og sett bilde deretter
     try {
-      // Prøv å lese fra capabilitiesObj direkte (raskere enn eget kall)
       const caps = nibe.capabilitiesObj || {};
-      const capObj = caps[capNm];
+      const capObj = caps[STATUS_CAP];
       const currentVal = capObj ? capObj.value : await readCapability();
-      const isCurrentlyActive = currentVal !== null && currentVal !== 0 && currentVal !== '0';
+      const isCurrentlyActive = isActiveValue(currentVal);
 
       if (isCurrentlyActive) {
         // Funksjon er allerede aktiv — vis aktivert bilde
@@ -490,7 +498,7 @@ async function pollStatus() {
   if (!online || !devId) return;
   try {
     const val = await readCapability();
-    const pumpActive = val !== null && val !== 0 && val !== '0' && val !== 'Off';
+    const pumpActive = isActiveValue(val);
     if (pumpActive !== active) {
       if (pumpActive) {
         setActive(true, HW_SEC, true);
