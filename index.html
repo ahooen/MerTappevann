@@ -319,7 +319,12 @@ function base() {
   if (!hid) return null;
   const h = hid.trim();
   if (h.startsWith('http')) return h.replace(/\/$/, '');
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) return 'http://' + h;
+  // Hvis ren IP: bruk Homey sin lokale HTTPS-adresse for å unngå
+  // mixed-content blokkering når siden lastes over HTTPS (GitHub Pages)
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) {
+    const dashed = h.replace(/\./g, '-');
+    return 'https://' + dashed + '.homey.homeylocal.com';
+  }
   return 'http://' + h;
 }
 
