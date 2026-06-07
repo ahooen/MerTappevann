@@ -491,29 +491,42 @@ function lock(reason) {
   setStatus(reason || 'Låst', 'err');
 }
 
-/* ── STATUS POLLING — sjekk pumpe hvert 15. sekund ── */
+/* ── STATUS POLLING — sjekk pumpe hvert 30. sekund ── */
 let pollInt = null;
+let lastActionAt = 0;   // tidspunkt for siste lokale trykk
+let offReadCount = 0;   // hysterese: teller påfølgende "off"-avlesninger
+const GRACE_MS = 150000; // 2,5 min — gi NIBE-appen tid til å polle pumpen
 
 async function pollStatus() {
   if (!online || !devId) return;
+  // Ikke overstyr rett etter en lokal handling — pumpens status henger etter
+  if (Date.now() - lastActionAt < GRACE_MS) return;
   try {
     const val = await readCapability();
     const pumpActive = isActiveValue(val);
-    if (pumpActive !== active) {
-      if (pumpActive) {
-        setActive(true, HW_SEC, true);
-        setStatus('Aktivert · 1 time', 'live');
-      } else {
-        setActive(false, 0, true);
-        setStatus('Lokalt tilkoblet · Klar', 'live');
-      }
+
+    if (pumpActive === active) { offReadCount = 0; return; }
+
+    if (!pumpActive && active) {
+      // Pumpen sier av, men vi viser på — krev to påfølgende avlesninger
+      offReadCount++;
+      if (offReadCount < 2) return;
+    }
+    offReadCount = 0;
+
+    if (pumpActive) {
+      setActive(true, HW_SEC, true);
+      setStatus('Aktivert · 1 time', 'live');
+    } else {
+      setActive(false, 0, true);
+      setStatus('Lokalt tilkoblet · Klar', 'live');
     }
   } catch {}
 }
 
 function startPolling() {
   if (pollInt) clearInterval(pollInt);
-  pollInt = setInterval(pollStatus, 15000);
+  pollInt = setInterval(pollStatus, 30000);
 }
 function stopPolling() {
   if (pollInt) { clearInterval(pollInt); pollInt = null; }
@@ -527,6 +540,8 @@ document.addEventListener('visibilitychange', () => {
 /* ── TAP HANDLER ── */
 async function tap() {
   const next = !active;
+  lastActionAt = Date.now();   // start grace-periode
+  offReadCount = 0;
 
   // Vis nytt bilde umiddelbart (med hysterese-forsinkelse på .1s i CSS)
   setActive(next, next ? HW_SEC : 0, false);
