@@ -149,12 +149,12 @@ body.active .ttxt{
 .spin{
   display:none;position:absolute;
   width:50px;height:50px;
+  margin-left:-25px;margin-top:-25px;
   border:3px solid rgba(249,115,22,.2);
   border-top-color:#f97316;
   border-radius:50%;
   animation:spin .7s linear infinite;
   z-index:15;pointer-events:none;
-  transform:translate(-50%,-50%);
 }
 body.loading .spin{display:block;}
 
@@ -330,6 +330,9 @@ function placeTap() {
     el.style.width  = (r * 2)  + 'px';
     el.style.height = (r * 2)  + 'px';
   }
+  // Spinner: senter-posisjonert over knappen (transform bruker ikke lenger translate)
+  sp.style.left = cx + 'px';
+  sp.style.top  = cy + 'px';
 
   // Dusjtid-tekst
   const availY = active ? AVAIL_Y_ON : AVAIL_Y_OFF;
@@ -544,6 +547,8 @@ async function connect(silent) {
     }
 
     // Les faktisk status fra pumpen og sett bilde deretter
+    // MEN: ikke overstyr hvis vi nettopp har trykket — Modbus henger 30+ sek etter
+    const inGrace = Date.now() - lastActionAt < GRACE_MS;
     try {
       const caps = nibe.capabilitiesObj || {};
       const capObj = caps[STATUS_CAP];
@@ -557,14 +562,18 @@ async function connect(silent) {
       const bt5val = bt5cap?.value ?? null;
       setAvail(showerMinutes([tTop ? tTop.value : null, tHw ? tHw.value : null, bt5val]));
 
-      if (isCurrentlyActive) {
-        // Funksjon er allerede aktiv — vis aktivert bilde
-        // Vi vet ikke nøyaktig gjenværende tid, sett 1h som maks
-        setActive(true, HW_SEC, true);
-        setStatus('Aktivert · 1 time', 'live');
+      if (!inGrace) {
+        // Utenfor grace-perioden: stol på pumpen
+        if (isCurrentlyActive) {
+          setActive(true, HW_SEC, true);
+          setStatus('Aktivert · 1 time', 'live');
+        } else {
+          setActive(false, 0, true);
+          setStatus('Lokalt tilkoblet · Klar', 'live');
+        }
       } else {
-        setActive(false, 0, true);
-        setStatus('Lokalt tilkoblet · Klar', 'live');
+        // Inne i grace-perioden: behold gjeldende visning, oppdater kun status-tekst
+        setStatus(active ? 'Aktivert · 1 time' : 'Lokalt tilkoblet · Klar', 'live');
       }
     } catch {
       // Kunne ikke lese status — vis inaktiv som default
@@ -693,7 +702,13 @@ function setActive(on, sec, immediate) {
 }
 
 function tick(el) {
-  if (cdsec <= 0) { clearInterval(cdInt); cdInt = null; setActive(false, 0, false); return; }
+  if (cdsec <= 0) {
+    clearInterval(cdInt); cdInt = null;
+    el.textContent = '';
+    // Ikke kall setActive(false) her — la pollStatus() bekrefte faktisk status
+    // fra pumpen i stedet for å anta at den er av
+    return;
+  }
   const h = Math.floor(cdsec / 3600);
   const m = Math.floor((cdsec % 3600) / 60);
   const s = cdsec % 60;
