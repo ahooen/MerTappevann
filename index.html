@@ -62,10 +62,11 @@ body{
   line-height:1;touch-action:manipulation;
 }
 
-/* IMAGE WRAP — fyller hele skjermen */
+/* IMAGE WRAP — starter under notch/kamera-området */
 .wrap{
   position:fixed;
-  inset:0;
+  top:var(--safe-top);
+  left:0;right:0;bottom:0;
   overflow:hidden;
 }
 
@@ -102,10 +103,29 @@ body.reverting .img-on {opacity:0;transition-duration:.3s;transition-delay:0s;}
 .tapbtn:active{background:rgba(255,255,255,.1);}
 body.loading .tapbtn{pointer-events:none;opacity:.5;}
 
-/* TIMER — overlay nederst på bildet */
+/* TILGJENGELIG DUSJTID — JS posisjonerer under undertittel */
+.avail{
+  position:absolute;
+  left:0;right:0;
+  text-align:center;
+  font-family:var(--m);
+  font-size:14px;
+  font-weight:500;
+  letter-spacing:.02em;
+  color:#9fb4c8;
+  z-index:15;
+  pointer-events:none;
+  opacity:0;
+  transition:opacity .4s,color .4s;
+  text-shadow:0 1px 4px rgba(0,0,0,.6);
+}
+.avail.show{opacity:1;}
+body.active .avail{color:#b7e6c0;}
+
+/* TIMER — overlay nederst, mørk pille så den ikke kolliderer med knappen */
 .tbar{
   position:absolute;
-  bottom:calc(var(--safe-bot) + .3rem);
+  bottom:calc(var(--safe-bot) + .15rem);
   left:0;right:0;
   height:1.6rem;
   display:flex;align-items:center;justify-content:center;
@@ -114,9 +134,15 @@ body.loading .tapbtn{pointer-events:none;opacity:.5;}
 .ttxt{
   font-family:var(--m);font-size:12px;letter-spacing:.1em;
   color:#1e3050;opacity:0;
-  transition:color .5s,opacity .4s;
+  padding:.25rem .9rem;border-radius:999px;
+  background:transparent;
+  transition:color .5s,opacity .4s,background .4s;
 }
-body.active .ttxt{color:#f97316;opacity:1;}
+body.active .ttxt{
+  color:#f97316;opacity:1;
+  background:rgba(0,0,0,.55);
+  -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
+}
 
 /* SPINNER */
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -188,6 +214,7 @@ body.loading .spin{display:block;}
   <button class="tapbtn" id="tapbtn" onclick="tap()"
           aria-label="Aktiver ekstra varmtvann"></button>
   <div class="spin" id="spin"></div>
+  <div class="avail" id="avail"></div>
 </div>
 
 <div class="tbar">
@@ -277,11 +304,15 @@ const BTN_X = 0.50, BTN_R = 0.21;
 const BTN_Y_OFF = 0.57;  // knappen i "ikke aktivert"-bildet
 const BTN_Y_ON  = 0.67;  // knappen i "aktivert"-bildet
 const IMG_NAT_W = 852, IMG_NAT_H = 1846;
+// Plassering av dusjtid-tekst (andel av bildehøyde, rett under undertittelen)
+const AVAIL_Y_OFF = 0.125;
+const AVAIL_Y_ON  = 0.125;
 
 function placeTap() {
   const wrap = document.getElementById('wrap');
   const btn  = document.getElementById('tapbtn');
   const sp   = document.getElementById('spin');
+  const av   = document.getElementById('avail');
   const wr   = wrap.getBoundingClientRect();
 
   const scale = wr.width / IMG_NAT_W;
@@ -299,11 +330,49 @@ function placeTap() {
     el.style.width  = (r * 2)  + 'px';
     el.style.height = (r * 2)  + 'px';
   }
+
+  // Dusjtid-tekst
+  const availY = active ? AVAIL_Y_ON : AVAIL_Y_OFF;
+  av.style.top = (rh * availY) + 'px';
 }
 
 window.addEventListener('load',   placeTap, {passive:true});
 window.addEventListener('resize', placeTap, {passive:true});
 document.getElementById('imgOff').addEventListener('load', placeTap, {once:true});
+
+/* ── DUSJTID-ESTIMAT ──
+   Samme formel som akkumulatortank-dashboardet:
+   180L tank, brukbart vann over 35°C, 4 L/min sparedusj ved 40°C (kaldt 10°C).
+   Bruker snittet av tappevannssensorene. */
+const TEMP_CAP_TOP = 'measure_temperature_NIBE.i8_warmwater_top'; // BT7 topp
+const TEMP_CAP_HW  = 'measure_temperature_NIBE.i9_hot_water';     // BT6 oppvarming
+const TEMP_CAP_BOT = 'measure_temperature_NIBE.i10_hot_water_bot'; // BT71 bunn
+
+// Fysisk korrekt formel:
+// Tilgjengelig energi = alt over dusjtemperaturen (40 C) i 180L-tanken.
+// Per dusjminutt blandes 4 L/min fra kaldt (10 C) til 40 C.
+// Begge bruker samme referansepunkt — sammenlignbart.
+const TANK_VOL = 180;           // liter
+const KALDT    = 10;            // C kaldtvann
+const DUSJ_T   = 40;           // C onsket dusjtemperatur
+const FLOW     = 4;             // L/min
+const CP       = 4.186 / 3600; // kWh per liter per kelvin
+const DUSJ_KWH_MIN = FLOW * CP * (DUSJ_T - KALDT); // energi per dusjminutt
+
+function showerMinutes(temps) {
+  const vld = temps.filter(t => t !== null && t !== undefined && !isNaN(t));
+  if (!vld.length) return null;
+  const snitt = vld.reduce((a, b) => a + b, 0) / vld.length;
+  const kwh = snitt > DUSJ_T ? TANK_VOL * CP * (snitt - DUSJ_T) : 0;
+  return kwh > 0 ? Math.round(kwh / DUSJ_KWH_MIN) : 0;
+}
+
+function setAvail(mins) {
+  const av = document.getElementById('avail');
+  if (mins === null) { av.classList.remove('show'); av.textContent = ''; return; }
+  av.textContent = '(ca. ' + mins + ' min dusj)';
+  av.classList.add('show');
+}
 
 /* ── STATUS UI ── */
 function setStatus(txt, state) {
@@ -409,7 +478,14 @@ async function readCapability() {
   const r = await apiFetch('/api/manager/devices/device/' + devId);
   if (!r.ok) return null;
   const d = await r.json();
-  const cap = (d.capabilitiesObj || {})[STATUS_CAP];
+  const caps = d.capabilitiesObj || {};
+  // Oppdater dusjtid samtidig (sparer et ekstra kall)
+  const tTop = caps[TEMP_CAP_TOP];
+  const tHw  = caps[TEMP_CAP_HW];
+  const tBot = caps[TEMP_CAP_BOT];
+  const temps = [tTop ? tTop.value : null, tHw ? tHw.value : null, tBot ? tBot.value : null];
+  setAvail(showerMinutes(temps));
+  const cap = caps[STATUS_CAP];
   return cap ? cap.value : null;
 }
 
@@ -457,6 +533,12 @@ async function connect(silent) {
       const capObj = caps[STATUS_CAP];
       const currentVal = capObj ? capObj.value : await readCapability();
       const isCurrentlyActive = isActiveValue(currentVal);
+
+      // Dusjtid fra varmtvannstemperatur (snitt av topp + oppvarming)
+      const tTop = caps[TEMP_CAP_TOP];
+      const tHw  = caps[TEMP_CAP_HW];
+      const tBot = caps[TEMP_CAP_BOT];
+      setAvail(showerMinutes([tTop ? tTop.value : null, tHw ? tHw.value : null, tBot ? tBot.value : null]));
 
       if (isCurrentlyActive) {
         // Funksjon er allerede aktiv — vis aktivert bilde
