@@ -80,6 +80,11 @@ body{
   /* Hysterese: fade over .6s, ingen blinking */
   transition:opacity .6s cubic-bezier(.4,0,.2,1);
 }
+/* Aktivert-bildet: forankre nederst slik at teksten/bunnen vises
+   helt ned (ingen blå stripe), med en bitte liten justering opp. */
+.img-on{
+  object-position:center bottom;
+}
 .img-off{opacity:1;}
 .img-on {opacity:0;}
 /* Active state — med .3s forsinkelse så bildet ikke blinker ved feil */
@@ -144,20 +149,6 @@ body.active .ttxt{
   -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
 }
 
-/* SPINNER */
-@keyframes spin{to{transform:rotate(360deg)}}
-.spin{
-  display:none;position:absolute;
-  width:50px;height:50px;
-  margin-left:-25px;margin-top:-25px;
-  border:3px solid rgba(249,115,22,.2);
-  border-top-color:#f97316;
-  border-radius:50%;
-  animation:spin .7s linear infinite;
-  z-index:15;pointer-events:none;
-}
-body.loading .spin{display:block;}
-
 /* CONFIG DRAWER */
 .drawer{
   position:fixed;inset:0;z-index:100;
@@ -213,7 +204,6 @@ body.loading .spin{display:block;}
        alt="Aktivert" draggable="false"/>
   <button class="tapbtn" id="tapbtn" onclick="tap()"
           aria-label="Aktiver ekstra varmtvann"></button>
-  <div class="spin" id="spin"></div>
   <div class="avail" id="avail"></div>
 </div>
 
@@ -293,6 +283,22 @@ let cdsec   = 0;
 let stateTO = null;   // hysterese-timer
 const HW_VAL = '2', HW_OFF = '0', HW_SEC = 3600; // capability krever string!
 
+/* ── PERSISTERT NEDTELLING ──
+   Vi lagrer tidspunktet aktiveringen startet, slik at gjenstående tid
+   beregnes på nytt når appen åpnes igjen (i stedet for å nullstilles til 1 t). */
+function startCountdown() {
+  sv('hw_started', String(Date.now()));
+}
+function clearCountdown() {
+  try { localStorage.removeItem('hw_started'); } catch {}
+}
+function remainingSec() {
+  const t = parseInt(lv('hw_started') || '', 10);
+  if (!t || isNaN(t)) return HW_SEC; // ukjent start → anta full time
+  const left = HW_SEC - Math.floor((Date.now() - t) / 1000);
+  return left > 0 ? left : 0;
+}
+
 /* ── TAP ZONE POSITIONING ──
    Bilder: 853x1844 (off) / 852x1846 (on) — nesten identiske
    Knapp senter i bilde: ~50% horisontalt, ~72% vertikalt
@@ -311,7 +317,6 @@ const AVAIL_Y_ON  = 0.125;
 function placeTap() {
   const wrap = document.getElementById('wrap');
   const btn  = document.getElementById('tapbtn');
-  const sp   = document.getElementById('spin');
   const av   = document.getElementById('avail');
   const wr   = wrap.getBoundingClientRect();
 
@@ -319,24 +324,25 @@ function placeTap() {
   const rw = IMG_NAT_W * scale;
   const rh = IMG_NAT_H * scale;
 
+  // Når aktivert er bildet forankret nederst (object-position:center bottom),
+  // så hele bildet er forskjøvet OPP med overflow-mengden. Vi kompenserer
+  // knapp og tekst med samme forskyvning så de følger bildet på alle skjermer.
+  const overflow = Math.max(0, rh - wr.height);
+  const yShift = active ? -overflow : 0;
+
   const btnY = active ? BTN_Y_ON : BTN_Y_OFF;
   const cx = rw * BTN_X;
-  const cy = rh * btnY;
+  const cy = rh * btnY + yShift;
   const r  = rw * BTN_R;
 
-  for (const el of [btn, sp]) {
-    el.style.left   = (cx - r) + 'px';
-    el.style.top    = (cy - r) + 'px';
-    el.style.width  = (r * 2)  + 'px';
-    el.style.height = (r * 2)  + 'px';
-  }
-  // Spinner: senter-posisjonert over knappen (transform bruker ikke lenger translate)
-  sp.style.left = cx + 'px';
-  sp.style.top  = cy + 'px';
+  btn.style.left   = (cx - r) + 'px';
+  btn.style.top    = (cy - r) + 'px';
+  btn.style.width  = (r * 2)  + 'px';
+  btn.style.height = (r * 2)  + 'px';
 
   // Dusjtid-tekst
   const availY = active ? AVAIL_Y_ON : AVAIL_Y_OFF;
-  av.style.top = (rh * availY) + 'px';
+  av.style.top = (rh * availY + yShift) + 'px';
 }
 
 window.addEventListener('load',   placeTap, {passive:true});
@@ -384,6 +390,12 @@ function setAvail(mins) {
 }
 
 /* ── STATUS UI ── */
+function statusLabel(sec) {
+  // Statusbar-tekst for aktivert tilstand, viser gjenstående tid
+  if (sec == null || sec >= HW_SEC - 60) return 'Aktivert · 1 time';
+  const m = Math.max(0, Math.round(sec / 60));
+  return 'Aktivert · ' + m + ' min igjen';
+}
 function setStatus(txt, state) {
   // state: 'live' | 'err' | null
   document.getElementById('stxt').textContent = txt;
@@ -565,15 +577,20 @@ async function connect(silent) {
       if (!inGrace) {
         // Utenfor grace-perioden: stol på pumpen
         if (isCurrentlyActive) {
-          setActive(true, HW_SEC, true);
-          setStatus('Aktivert · 1 time', 'live');
+          // Hvis vi ikke har et lagret starttidspunkt (f.eks. aktivert utenfor
+          // appen), forankre det nå slik at nedtellingen får et utgangspunkt.
+          if (!lv('hw_started')) startCountdown();
+          const left = remainingSec();
+          setActive(true, left, true);
+          setStatus(statusLabel(left), 'live');
         } else {
+          clearCountdown();
           setActive(false, 0, true);
           setStatus('Lokalt tilkoblet · Klar', 'live');
         }
       } else {
         // Inne i grace-perioden: behold gjeldende visning, oppdater kun status-tekst
-        setStatus(active ? 'Aktivert · 1 time' : 'Lokalt tilkoblet · Klar', 'live');
+        setStatus(active ? statusLabel(cdsec) : 'Lokalt tilkoblet · Klar', 'live');
       }
     } catch {
       // Kunne ikke lese status — vis inaktiv som default
@@ -623,9 +640,12 @@ async function pollStatus() {
     offReadCount = 0;
 
     if (pumpActive) {
-      setActive(true, HW_SEC, true);
-      setStatus('Aktivert · 1 time', 'live');
+      if (!lv('hw_started')) startCountdown();
+      const left = remainingSec();
+      setActive(true, left, true);
+      setStatus(statusLabel(left), 'live');
     } else {
+      clearCountdown();
       setActive(false, 0, true);
       setStatus('Lokalt tilkoblet · Klar', 'live');
     }
@@ -651,6 +671,9 @@ async function tap() {
   lastActionAt = Date.now();   // start grace-periode
   offReadCount = 0;
 
+  // Lagre/nullstill starttidspunkt for nedtellingen
+  if (next) startCountdown(); else clearCountdown();
+
   // Vis nytt bilde umiddelbart (med hysterese-forsinkelse på .1s i CSS)
   setActive(next, next ? HW_SEC : 0, false);
 
@@ -665,6 +688,8 @@ async function tap() {
     clearTimeout(stateTO);
     stateTO = setTimeout(() => {
       document.body.classList.add('reverting');
+      // Angre den persistente nedtellingen siden kommandoen feilet
+      if (next) clearCountdown(); else startCountdown();
       setActive(!next, 0, false);
       setTimeout(() => document.body.classList.remove('reverting'), 400);
     }, 300);
@@ -689,7 +714,7 @@ function setActive(on, sec, immediate) {
 
   const tel = document.getElementById('ttxt');
   if (on) {
-    cdsec = sec || HW_SEC;
+    cdsec = (sec == null) ? HW_SEC : sec;
     clearInterval(cdInt);
     tick(tel);
     cdInt = setInterval(() => tick(tel), 1000);
