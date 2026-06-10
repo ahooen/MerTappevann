@@ -82,7 +82,7 @@ body{
 /* Ikke-aktivert: forankret topp */
 .img-off{ object-position:center 0%; opacity:1; }
 /* Aktivert: skyv bildet ned så overskriften vises og blå stripe forsvinner */
-.img-on{ object-position:center 62%; opacity:0; }
+.img-on{ object-position:center 52%; opacity:0; }
 /* Active state — med .3s forsinkelse så bildet ikke blinker ved feil */
 body.active   .img-off{opacity:0;transition-delay:.1s;}
 body.active   .img-on {opacity:1;transition-delay:.1s;}
@@ -319,7 +319,7 @@ function placeTap() {
   // Aktivert-bildet er forankret med object-position:center 78%, dvs. bildet
   // er forskjøvet OPP med (0.78 × overflow). Vi kompenserer knapp og tekst med
   // samme forskyvning så de følger bildet nøyaktig på alle skjermer.
-  const IMG_POS_ON = 0.62; // MÅ stemme med object-position for .img-on i CSS
+  const IMG_POS_ON = 0.52; // MÅ stemme med object-position for .img-on i CSS
   const overflow = Math.max(0, rh - wr.height);
   const yShift = active ? -(overflow * IMG_POS_ON) : 0;
 
