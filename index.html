@@ -345,26 +345,32 @@ document.getElementById('imgOff').addEventListener('load', placeTap, {once:true}
    180L tank, brukbart vann over 35°C, 4 L/min sparedusj ved 40°C (kaldt 10°C).
    Bruker snittet av tappevannssensorene. */
 const TEMP_CAP_TOP = 'measure_temperature_NIBE.i8_warmwater_top'; // BT7 topp
-const TEMP_CAP_HW  = 'measure_temperature_NIBE.i9_hot_water';     // BT6 oppvarming
-const TEMP_CAP_BOT = 'measure_temperature_NIBE.i10_hot_water_bot'; // BT71 bunn
+const TEMP_CAP_HW  = 'measure_temperature_NIBE.i9_hot_water';     // BT6 charging (kontrollsensor)
+const BT5_DEV_ID   = '268d71a6-f117-4f0c-860e-c37377e7d1f9';      // Nibe BT5 (DeviceCapabilities)
+const BT5_CAP      = 'devicecapabilities_number.number1';          // BT5 bunn
 
-// Fysisk korrekt formel:
-// Tilgjengelig energi = alt over dusjtemperaturen (40 C) i 180L-tanken.
-// Per dusjminutt blandes 4 L/min fra kaldt (10 C) til 40 C.
-// Begge bruker samme referansepunkt — sammenlignbart.
-const TANK_VOL = 180;           // liter
-const KALDT    = 10;            // C kaldtvann
-const DUSJ_T   = 40;           // C onsket dusjtemperatur
-const FLOW     = 4;             // L/min
-const CP       = 4.186 / 3600; // kWh per liter per kelvin
-const DUSJ_KWH_MIN = FLOW * CP * (DUSJ_T - KALDT); // energi per dusjminutt
+// Nibes egen blandingsformel (reverse engineered fra myUplink + datablad):
+//   usable_L = tank_vol × (T_bt6 - T_kald) / (T_dusj - T_kald)
+//   minutter  = usable_L / flow_L_min
+//
+// Nibe bruker BT6 (charging/kontrollsensor, midt i tank) som temperaturkilde,
+// 10 L/min (EN 13203 standard dusjflow) og 180 L tankvolum.
+// Gir eksakt 20 min ved BT6=43.8°C — matcher Nibe sin egen app.
+const HW_VOL   = 180;   // liter
+const T_KALD   = 10;    // °C kaldtvann
+const T_DUSJ   = 40;    // °C ønsket dusjtemperatur
+const FLOW     = 10;    // L/min (EN 13203 standard)
 
 function showerMinutes(temps) {
   const vld = temps.filter(t => t !== null && t !== undefined && !isNaN(t));
   if (!vld.length) return null;
-  const snitt = vld.reduce((a, b) => a + b, 0) / vld.length;
-  const kwh = snitt > DUSJ_T ? TANK_VOL * CP * (snitt - DUSJ_T) : 0;
-  return kwh > 0 ? Math.round(kwh / DUSJ_KWH_MIN) : 0;
+  // Bruk BT6 (index 1) som primær — det er Nibes kontrollsensor.
+  // Faller tilbake til snitt hvis BT6 mangler.
+  const T = temps[1] != null && !isNaN(temps[1]) ? temps[1]
+          : vld.reduce((a, b) => a + b, 0) / vld.length;
+  if (T <= T_DUSJ) return 0;
+  const usable = HW_VOL * (T - T_KALD) / (T_DUSJ - T_KALD);
+  return Math.round(usable / FLOW);
 }
 
 function setAvail(mins) {
@@ -416,6 +422,9 @@ async function apiFetch(path, opts) {
     throw new Error(e.name === 'AbortError' ? 'Tidsavbrudd — er du hjemme?' : 'Ikke tilgjengelig på LAN');
   }
 }
+
+/* ── DEVICE CACHE — brukes til BT5-oppslag i readCapability ── */
+let devs_cache = [];
 
 async function getDevices() {
   if (!hkey) throw new Error('Mangler API Key');
@@ -482,8 +491,14 @@ async function readCapability() {
   // Oppdater dusjtid samtidig (sparer et ekstra kall)
   const tTop = caps[TEMP_CAP_TOP];
   const tHw  = caps[TEMP_CAP_HW];
-  const tBot = caps[TEMP_CAP_BOT];
-  const temps = [tTop ? tTop.value : null, tHw ? tHw.value : null, tBot ? tBot.value : null];
+  // BT5 ligger på egen DeviceCapabilities-enhet
+  let bt5 = null;
+  try {
+    const bt5dev = devs_cache.find(d => d.id === BT5_DEV_ID);
+    const bt5cap = bt5dev?.capabilitiesObj?.[BT5_CAP];
+    bt5 = (bt5cap && bt5cap.value != null) ? bt5cap.value : null;
+  } catch {}
+  const temps = [tTop ? tTop.value : null, tHw ? tHw.value : null, bt5];
   setAvail(showerMinutes(temps));
   const cap = caps[STATUS_CAP];
   return cap ? cap.value : null;
@@ -506,6 +521,7 @@ async function connect(silent) {
   if (!silent) setStatus('Kobler til…', null);
   try {
     const devs = await getDevices();
+    devs_cache = devs; // cache for BT5-oppslag i readCapability
 
     let nibe;
     if (!devId || !capNm) {
@@ -534,11 +550,12 @@ async function connect(silent) {
       const currentVal = capObj ? capObj.value : await readCapability();
       const isCurrentlyActive = isActiveValue(currentVal);
 
-      // Dusjtid fra varmtvannstemperatur (snitt av topp + oppvarming)
+      // Dusjtid fra varmtvannstemperatur (BT7 topp + BT6 oppvarming + BT5 bunn)
       const tTop = caps[TEMP_CAP_TOP];
       const tHw  = caps[TEMP_CAP_HW];
-      const tBot = caps[TEMP_CAP_BOT];
-      setAvail(showerMinutes([tTop ? tTop.value : null, tHw ? tHw.value : null, tBot ? tBot.value : null]));
+      const bt5cap = devs.find(d => d.id === BT5_DEV_ID)?.capabilitiesObj?.[BT5_CAP];
+      const bt5val = bt5cap?.value ?? null;
+      setAvail(showerMinutes([tTop ? tTop.value : null, tHw ? tHw.value : null, bt5val]));
 
       if (isCurrentlyActive) {
         // Funksjon er allerede aktiv — vis aktivert bilde
