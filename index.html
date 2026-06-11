@@ -43,7 +43,6 @@ body{padding-top:var(--safe-top);padding-bottom:var(--safe-bot)}
   position:absolute;top:var(--safe-top);left:0;right:0;z-index:20;
   display:flex;align-items:center;justify-content:space-between;
   height:1.8rem;padding:.35rem .9rem;
-  background:linear-gradient(to bottom,rgba(0,0,0,.45),transparent);
 }
 .sleft{display:flex;align-items:center;gap:6px}
 .sdot{width:6px;height:6px;border-radius:50%;background:var(--accent);
@@ -90,9 +89,9 @@ body.loading .tapbtn{pointer-events:none}
 .avail.show{opacity:1}
 body.active .avail{color:var(--avail-on)}
 
-/* ---- NEDTELLING (bunnen av skjermen) ---- */
+/* ---- NEDTELLING — i det ledige feltet nederst i bildet ---- */
 .tbar{
-  position:absolute;left:0;right:0;bottom:calc(var(--safe-bot) + .6rem);
+  position:absolute;left:0;right:0;
   text-align:center;z-index:15;pointer-events:none;
 }
 .ttxt{font-family:var(--m);font-size:13px;color:var(--ok);
@@ -202,7 +201,7 @@ body.loading .sbar::after{
   <div class="avail" id="avail"></div>
 </div>
 
-<div class="tbar"><span class="ttxt" id="ttxt"></span></div>
+<div class="tbar" id="tbar"><span class="ttxt" id="ttxt"></span></div>
 <div class="toast" id="toast"></div>
 
 <div class="drawer" id="drawer">
@@ -283,6 +282,7 @@ const BTN = {
   on:  { x: 0.505, y: 0.657, r: 0.245 },
 };
 const AVAIL_Y = 0.150;   // likt i begge bildene
+const TBAR_Y  = 0.935;   // nedtelling: ledig mørkt felt under tekstboksen
 
 function placeTap() {
   const wr = $('wrap').getBoundingClientRect();
@@ -296,6 +296,7 @@ function placeTap() {
   b.style.top    = (cy - r) + 'px';
   b.style.width  = b.style.height = (r * 2) + 'px';
   $('avail').style.top = (IMG_H * s * AVAIL_Y) + 'px';
+  $('tbar').style.top  = (IMG_H * s * TBAR_Y)  + 'px';
 }
 addEventListener('load',   placeTap, {passive:true});
 addEventListener('resize', placeTap, {passive:true});
