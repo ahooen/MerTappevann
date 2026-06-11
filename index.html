@@ -57,7 +57,7 @@ body{padding-top:var(--safe-top);padding-bottom:var(--safe-bot)}
         font-size:17px;padding:8px 10px;line-height:1;touch-action:manipulation}
 
 /* ---- BILDER (kryssfading mellom av/på) ---- */
-.wrap{position:relative;width:100%;height:100%;overflow:hidden}
+.wrap{position:fixed;inset:0;width:100%;height:100dvh;min-height:100vh;overflow:hidden}
 .simg{
   position:absolute;inset:0;width:100%;height:100%;
   object-fit:cover;object-position:center top;pointer-events:none;
@@ -194,9 +194,9 @@ body.loading .sbar::after{
 </div>
 
 <div class="wrap" id="wrap">
-  <img class="simg img-off" id="imgOff" src="img-off.webp" decoding="async"
+  <img class="simg img-off" id="imgOff" src="img-off.webp?v=2" decoding="async"
        alt="Lite dusjvann tilgjengelig — trykk på knappen for ekstra varmtvann" draggable="false"/>
-  <img class="simg img-on" src="img-on.webp" decoding="async"
+  <img class="simg img-on" src="img-on.webp?v=2" decoding="async"
        alt="Mye dusjvann tilgjengelig — ekstra varmtvann er aktivert" draggable="false"/>
   <button class="tapbtn" id="tapbtn" aria-label="Slå av/på ekstra varmtvann"></button>
   <div class="avail" id="avail"></div>
