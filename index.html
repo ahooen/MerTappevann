@@ -62,10 +62,10 @@ body{
   line-height:1;touch-action:manipulation;
 }
 
-/* IMAGE WRAP — starter under notch/kamera-området */
+/* IMAGE WRAP — fyller hele skjermen inkl. notch-area */
 .wrap{
   position:fixed;
-  top:var(--safe-top);
+  top:0;
   left:0;right:0;bottom:0;
   overflow:hidden;
 }
@@ -126,7 +126,7 @@ body.active .avail{color:#b7e6c0;}
 /* TIMER — overlay nederst, mørk pille så den ikke kolliderer med knappen */
 .tbar{
   position:absolute;
-  bottom:calc(var(--safe-bot) + .15rem);
+  bottom:var(--safe-bot);
   left:0;right:0;
   height:1.6rem;
   display:flex;align-items:center;justify-content:center;
@@ -303,8 +303,8 @@ const BTN_Y_OFF = 0.545;  // knappen i "ikke aktivert"-bildet
 const BTN_Y_ON  = 0.58;   // knappen i "aktivert"-bildet
 const IMG_NAT_W = 1290, IMG_NAT_H = 2796;
 // Plassering av dusjtid-tekst (andel av bildehøyde, rett under undertittelen)
-const AVAIL_Y_OFF = 0.125;
-const AVAIL_Y_ON  = 0.125;
+const AVAIL_Y_OFF = 0.26;
+const AVAIL_Y_ON  = 0.26;
 
 function placeTap() {
   const wrap = document.getElementById('wrap');
