@@ -303,17 +303,49 @@ addEventListener('load',   placeTap, {passive:true});
 addEventListener('resize', placeTap, {passive:true});
 $('imgOff').addEventListener('load', placeTap, {once:true});
 
-/* ── 3. DUSJTID — Nibes egen blandingsformel ────────────────
-   usable_L = 180 L × (T_bt6 − 10°C) / (40°C − 10°C); minutter = usable_L / 10 L/min.
-   BT6 (kontrollsensoren, index 1) er primær; snitt av sensorene som fallback. */
-function showerMinutes(temps) {
-  const valid = temps.filter(t => typeof t === 'number' && !isNaN(t));
-  if (!valid.length) return null;
-  const T = (typeof temps[1] === 'number' && !isNaN(temps[1]))
-          ? temps[1]
-          : valid.reduce((a,b) => a+b, 0) / valid.length;
-  if (T <= 40) return 0;
-  return Math.round(180 * (T - 10) / 30 / 10);
+/* ── 3. DUSJTID — sjiktet tankmodell forankret i EN16147 ────
+   Kilder (NIBE produktblad S1256 + installatørhåndbok S-serien):
+   • Berederen i S1256-8 EM rommer 178 liter.
+   • Sertifisert tappevolum 40 °C (V40, EN16147) ved full lading:
+     235 / 250 / 275 l i komfort Lite / Middels / Stor.
+   • BT7 sitter i toppen, BT6 i midten av berederen; (NIBE-)BT5 er
+     en valgfri giver MELLOM BT6 og BT7.
+
+   Modell: tanken deles i fire like sjikt. Ved tapping presses varmt
+   vann ut i toppen mens kaldt fyller på i bunnen — et sjikt under
+   dusjtemperatur (40 °C) kan derfor ALDRI tappes som dusjvann og
+   bidrar med null. Sjikt ≥40 °C bidrar med blandevolum
+   V/4 · (T − T_kald)/(40 − T_kald). Summen er liter 40 °C-vann;
+   delt på dusjens vannmengde gir det minutter.
+   Kontroll mot fasit: full tank i Middels (~52 °C jevnt) gir
+   178·(52,1−10)/30 = 250 l — nøyaktig NIBEs sertifiserte V40. */
+const TANK_L     = 178;   // bereder, S1256-8 EM
+const T_COLD     = 10;    // kaldtvann inn (EN16147-referanse)
+const T_SHOWER   = 40;    // ferdig blandet dusjtemperatur
+const FLOW_LPM   = 12;    // dusjhode, l/min (NIBE regner ~12; sparedusj ≈ 9)
+const EXTRA_POS  = 'mid'; // myUplink 10894 = «Hot water start (BT5)» — sitter MELLOM BT6 og BT7
+                          // alternativ: 'bottom' hvis du senere får egen giver i bunnen
+
+function showerMinutes({ bt7, bt5, bt6 }) {
+  const num = v => (typeof v === 'number' && isFinite(v)) ? v : null;
+  bt7 = num(bt7); bt5 = num(bt5); bt6 = num(bt6);
+  if (bt7 === null && bt6 === null) return null;   // ingen data
+  if (bt7 === null) bt7 = bt6;                     // tåler én død giver
+  if (bt6 === null) bt6 = bt7;
+
+  // Fire sjikt, topp → bunn. Uten bunngiver ekstrapoleres gradienten
+  // BT-mid→BT6 nedover, avgrenset til [T_COLD, BT6].
+  const tMid = (EXTRA_POS === 'mid' && bt5 !== null) ? bt5 : (bt7 + bt6) / 2;
+  const tBot = (EXTRA_POS === 'bottom' && bt5 !== null)
+             ? bt5
+             : Math.min(bt6, Math.max(T_COLD, bt6 - (tMid - bt6)));
+
+  let liters40 = 0;
+  for (const T of [bt7, tMid, bt6, tBot])
+    if (T >= T_SHOWER)
+      liters40 += (TANK_L / 4) * (T - T_COLD) / (T_SHOWER - T_COLD);
+
+  return Math.round(liters40 / FLOW_LPM);
 }
 function setAvail(mins) {
   const el = $('avail');
@@ -325,11 +357,11 @@ function setAvail(mins) {
 function updateAvailFrom(caps) {
   const bt5 = devsCache.find(d => d.id === BT5_DEV_ID)
                 ?.capabilitiesObj?.[BT5_CAP]?.value ?? null;
-  setAvail(showerMinutes([
-    caps[TEMP_CAP_TOP]?.value ?? null,
-    caps[TEMP_CAP_HW]?.value ?? null,
+  setAvail(showerMinutes({
+    bt7: caps[TEMP_CAP_TOP]?.value ?? null,
     bt5,
-  ]));
+    bt6: caps[TEMP_CAP_HW]?.value ?? null,
+  }));
 }
 
 /* ── 4. STATUS-UI ───────────────────────────────────────────── */
@@ -425,16 +457,29 @@ async function runScript(id) {
   const r = await apiFetch(
     '/api/app/com.athom.homeyscript/script/' + encodeURIComponent(id) + '/run',
     { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
-  if (!r.ok) {
-    let body=''; try { body = await r.text(); } catch {}
+  let body=''; try { body = await r.text(); } catch {}
+  if (!r.ok)
     throw new Error('Script feilet HTTP ' + r.status + ': ' + body.slice(0,60));
-  }
+  try {                       // HomeyScript kan svare 200 med success:false
+    const j = JSON.parse(body);
+    if (j && j.success === false)
+      throw new Error('Script kastet feil: ' + String(j.returns ?? '').slice(0,60));
+  } catch (e) { if (String(e.message).startsWith('Script kastet')) throw e; }
 }
 
-/* Leser pumpens faktiske status (measure_enum) og oppdaterer dusjtid samtidig. */
+/* Leser pumpens status og oppdaterer dusjtid. BT5-enheten hentes
+   parallelt så bunntemperaturen er like fersk som resten. */
 async function readStatus() {
-  const r = await apiFetch('/api/manager/devices/device/' + devId);
+  const [r, rBt5] = await Promise.all([
+    apiFetch('/api/manager/devices/device/' + devId),
+    apiFetch('/api/manager/devices/device/' + BT5_DEV_ID).catch(() => null),
+  ]);
   if (!r.ok) return null;
+  if (rBt5?.ok) {
+    const d = await rBt5.json();
+    const i = devsCache.findIndex(x => x.id === BT5_DEV_ID);
+    i >= 0 ? devsCache[i] = d : devsCache.push(d);
+  }
   const caps = (await r.json()).capabilitiesObj || {};
   updateAvailFrom(caps);
   return caps[STATUS_CAP]?.value ?? null;
