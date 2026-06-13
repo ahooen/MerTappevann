@@ -322,7 +322,7 @@ $('imgOff').addEventListener('load', placeTap, {once:true});
 const TANK_L     = 178;   // bereder, S1256-8 EM
 const T_COLD     = 10;    // kaldtvann inn (EN16147-referanse)
 const T_SHOWER   = 40;    // ferdig blandet dusjtemperatur
-const FLOW_LPM   = 12;    // dusjhode, l/min (NIBE regner ~12; sparedusj ≈ 9)
+const FLOW_LPM   = 10.2;  // kalibrert mot NIBE-appen (234 l → 23 min ved 48/51/53 °C)
 const EXTRA_POS  = 'mid'; // myUplink 10894 = «Hot water start (BT5)» — sitter MELLOM BT6 og BT7
                           // alternativ: 'bottom' hvis du senere får egen giver i bunnen
 
@@ -431,7 +431,8 @@ async function getDevices() {
   return Object.values(await r.json());
 }
 function findNibe(devs) {
-  const d = devs.find(d => d.name?.toLowerCase().includes('nibe s'));
+  // Eksakt navn — løst søk plukket feilaktig «Nibe Supply Line»
+  const d = devs.find(d => d.name === 'Nibe S-Series');
   if (!d) throw new Error('Fant ikke Nibe S-Series i Homey');
   devId = d.id; sv('hw_devId', devId);
   return d;
