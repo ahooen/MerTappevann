@@ -60,7 +60,7 @@ body{padding-top:var(--safe-top);padding-bottom:var(--safe-bot)}
 /* ---- BILDER (kryssfading mellom av/på) ---- */
 .wrap{position:fixed;inset:0;overflow:hidden} /* inset:0 strekker til hele viewport */
 .simg{
-  position:absolute;inset:0;width:100%;height:100%;
+  position:absolute;inset:0;width:100%;height:100%;z-index:1;
   object-fit:cover;object-position:center top;pointer-events:none;
   transition:opacity .9s ease;
 }
@@ -82,7 +82,7 @@ body.loading .tapbtn{pointer-events:none}
 
 /* ---- DUSJTID — "(NN min Varmtvann)" under underteksten ---- */
 .avail{
-  position:absolute;left:0;right:0;z-index:9;
+  position:absolute;left:0;right:0;z-index:12;
   text-align:center;font-family:var(--m);
   font-size:clamp(13px,3.7vw,17px);letter-spacing:.02em;
   color:var(--avail-off);text-shadow:0 1px 6px rgba(0,0,0,.8);
@@ -195,9 +195,9 @@ body.loading .sbar::after{
 </div>
 
 <div class="wrap" id="wrap">
-  <img class="simg img-off" id="imgOff" src="img-off.webp?v=3" decoding="async"
+  <img class="simg img-off" id="imgOff" src="img-off.webp?v=4" decoding="async"
        alt="Lite dusjvann tilgjengelig — trykk på knappen for ekstra varmtvann" draggable="false"/>
-  <img class="simg img-on" src="img-on.webp?v=3" decoding="async"
+  <img class="simg img-on" src="img-on.webp?v=4" decoding="async"
        alt="Mye dusjvann tilgjengelig — ekstra varmtvann er aktivert" draggable="false"/>
   <button class="tapbtn" id="tapbtn" aria-label="Slå av/på ekstra varmtvann" aria-pressed="false"></button>
   <div class="avail" id="avail"></div>
@@ -209,7 +209,7 @@ body.loading .sbar::after{
 <div class="drawer" id="drawer">
   <div class="panel">
     <div class="ph"></div>
-    <div class="pt">Homey · Tilkobling</div>
+    <div class="pt">Homey · Tilkobling<span style="float:right;color:#54708c;font-weight:400">v4</span></div>
     <div class="pconn" id="pconn" style="display:none">
       <div class="pcdot"></div>
       <div class="pctxt">Tilkoblet og klar<span class="pcsub" id="pcsub"></span></div>
@@ -230,7 +230,7 @@ body.loading .sbar::after{
       <button class="pbtn" id="psave">Lagre og test tilkobling</button>
       <div class="perr" id="perr"></div>
     </div>
-    <div class="pnote">Build 2025-06 · v3<br>
+    <div class="pnote">
       Lokal LAN-tilkobling kun. Homey IP: <code>192.168.1.200</code><br>
       API Key: <a href="https://my.homey.app" target="_blank" rel="noopener">my.homey.app</a>
       → Innstillinger → API Keys → <em>Devices + HomeyScript</em>
