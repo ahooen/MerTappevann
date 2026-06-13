@@ -195,9 +195,9 @@ body.loading .sbar::after{
 </div>
 
 <div class="wrap" id="wrap">
-  <img class="simg img-off" id="imgOff" src="img-off.webp?v=4" decoding="async"
+  <img class="simg img-off" id="imgOff" src="img-off.webp?v=8" decoding="async"
        alt="Lite dusjvann tilgjengelig — trykk på knappen for ekstra varmtvann" draggable="false"/>
-  <img class="simg img-on" src="img-on.webp?v=4" decoding="async"
+  <img class="simg img-on" src="img-on.webp?v=8" decoding="async"
        alt="Mye dusjvann tilgjengelig — ekstra varmtvann er aktivert" draggable="false"/>
   <button class="tapbtn" id="tapbtn" aria-label="Slå av/på ekstra varmtvann" aria-pressed="false"></button>
   <div class="avail" id="avail"></div>
@@ -209,7 +209,7 @@ body.loading .sbar::after{
 <div class="drawer" id="drawer">
   <div class="panel">
     <div class="ph"></div>
-    <div class="pt">Homey · Tilkobling<span style="float:right;color:#54708c;font-weight:400">v4</span></div>
+    <div class="pt">Homey · Tilkobling<span style="float:right;color:#54708c;font-weight:400">v8-dbg</span></div>
     <div class="pconn" id="pconn" style="display:none">
       <div class="pcdot"></div>
       <div class="pctxt">Tilkoblet og klar<span class="pcsub" id="pcsub"></span></div>
@@ -256,7 +256,8 @@ const rm = k => { try { localStorage.removeItem(k); } catch {} };
 
 let hid  = lv('hw_hid')  || '192.168.1.200';   // Homey IP/host
 let hkey = lv('hw_hkey') || '';                 // API Key
-let devId = lv('hw_devId') || '';               // Nibe device-ID (caches)
+const NIBE_DEV_ID = 'd7e1c2c9-34e2-4923-84aa-b8dcb6abf01a'; // Nibe S-Series (77 caps)
+let devId = lv('hw_devId') || NIBE_DEV_ID;       // Nibe device-ID (caches)
 
 const STATUS_CAP   = 'measure_enum_NIBE.h697_onetimeincrease_hotwater'; // pumpens faktiske status
 const TEMP_CAP_TOP = 'measure_temperature_NIBE.i8_warmwater_top';       // BT7 topp
@@ -357,11 +358,19 @@ function setAvail(mins) {
 function updateAvailFrom(caps) {
   const bt5 = devsCache.find(d => d.id === BT5_DEV_ID)
                 ?.capabilitiesObj?.[BT5_CAP]?.value ?? null;
-  setAvail(showerMinutes({
-    bt7: caps[TEMP_CAP_TOP]?.value ?? null,
-    bt5,
-    bt6: caps[TEMP_CAP_HW]?.value ?? null,
-  }));
+  const bt7 = caps[TEMP_CAP_TOP]?.value ?? null;
+  const bt6 = caps[TEMP_CAP_HW]?.value ?? null;
+  const mins = showerMinutes({ bt7, bt5, bt6 });
+  if (mins === null) {
+    const el = $('avail');
+    // Vis hvilke temperatur-nøkler responsen faktisk har
+    const keys = Object.keys(caps).filter(k => /warmwater|hot_water|i8|i9|temp/i.test(k));
+    el.textContent = 'DBG ' + (keys.length ? keys.slice(0,3).join(' | ') : 'INGEN temp-nøkler · ' + Object.keys(caps).length + ' caps');
+    el.classList.add('show');
+    el.style.fontSize = '9px';
+    return;
+  }
+  setAvail(mins);
 }
 
 /* ── 4. STATUS-UI ───────────────────────────────────────────── */
@@ -431,8 +440,11 @@ async function getDevices() {
   return Object.values(await r.json());
 }
 function findNibe(devs) {
-  // Eksakt navn — løst søk plukket feilaktig «Nibe Supply Line»
-  const d = devs.find(d => d.name === 'Nibe S-Series');
+  // Eksakt navn. Krev mange kapabiliteter så vi aldri velger en
+  // 1-kapabilitets DC-hjelper ved et uhell.
+  const real = d => d.name === 'Nibe S-Series'
+    && Object.keys(d.capabilitiesObj || {}).length > 10;
+  const d = devs.find(real) || devs.find(d => d.name === 'Nibe S-Series');
   if (!d) throw new Error('Fant ikke Nibe S-Series i Homey');
   devId = d.id; sv('hw_devId', devId);
   return d;
@@ -526,8 +538,13 @@ async function connect(silent) {
   try {
     const devs = await getDevices();
     devsCache = devs;
-    let nibe = devId && devs.find(d => d.id === devId);
+    // Foretrekk kjent pumpe-ID; verifiser at den har mange kapabiliteter.
+    let nibe = devs.find(d => d.id === NIBE_DEV_ID
+      && Object.keys(d.capabilitiesObj || {}).length > 10);
+    if (!nibe) nibe = devId && devs.find(d => d.id === devId
+      && Object.keys(d.capabilitiesObj || {}).length > 10);
     if (!nibe) nibe = findNibe(devs);
+    devId = nibe.id; sv('hw_devId', devId);
 
     online = true;
     $('tapbtn').disabled = false;
